@@ -1,0 +1,7 @@
+# To install dependencies run pip3 install -r requirements.txt
+#
+#
+
+bleak==0.21.1
+matplotlib==3.8.3
+pandas==2.2.1
