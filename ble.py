@@ -1,43 +1,42 @@
 import asyncio
 from bleak import BleakClient
-from datetime import datetime
+import re
 
-#Written by Gino Porretta, gmp7878@g.rit.edu
+# Written by Gino Porretta, gmp7878@g.rit.edu
 
-HM10_ADDRESS = "68:5E:1C:26:D5:D3"  # CHANGE THIS TO HM10_ADDRESS FOUND USING THE SCANNER
+HM10_ADDRESS = "68:5E:1C:26:D5:D3"  # CHANGE THIS TO YOUR HM-10 ADDRESS
 CHARACTERISTIC_UUID = "0000ffe1-0000-1000-8000-00805f9b34fb"  # Standard HM-10 read/write UUID
 
-# Global variables
-log_file = None
-receive_buffer = ""  # Buffer to accumulate partial messages
+# Global buffer to accumulate partial messages
+receive_buffer = ""
 
 # Callback function for receiving data from HM-10
 def read_callback(sender, data):
-    global receive_buffer, log_file
-    decoded = data.decode('utf-8')
+    global receive_buffer
+    decoded = data.decode('utf-8', errors='ignore')
     receive_buffer += decoded
 
-    # Process complete lines
-    while '\n' in receive_buffer:
-        line, receive_buffer = receive_buffer.split('\n', 1)
-        print(line, flush=True)
-        if log_file:
-            log_file.write(line + '\n')
-            log_file.flush()
+    # Split into lines using common line endings
+    lines = re.split(r'\r\n|\r|\n', receive_buffer)
+    receive_buffer = lines.pop()  # Keep the last partial line
 
-# Send input over BLE to HM-10
+    for line in lines:
+        if line:
+            print(line, flush=True)
+
+# Send user input over BLE to HM-10
 async def user_input_writer(client, char_uuid):
+    print("Enter message (or 'exit' to quit):\n")
     while True:
-        message = await asyncio.get_event_loop().run_in_executor(None, input, "Enter message (or 'exit' to quit): ")
+        message = await asyncio.get_event_loop().run_in_executor(None, input)
         if message.lower() == 'exit':
             break
         message_with_newline = message + '\n'
         await client.write_gatt_char(char_uuid, message_with_newline.encode('utf-8'))
-        print(f"Sent: {message}")
+        #print(f"Sent: {message}")
 
-# Main connection and communication loop
+# Main BLE connection and communication loop
 async def connect_and_communicate(address, char_uuid):
-    global log_file
     async with BleakClient(address) as client:
         if not client.is_connected:
             print("Failed to connect.")
@@ -45,22 +44,15 @@ async def connect_and_communicate(address, char_uuid):
 
         print("Connected to HM-10")
 
-        # Create log file with timestamp
-        timestamp = datetime.now().strftime("%Y-%m-%d_%H-%M-%S")
-        filename = f"HM10_log_{timestamp}.txt"
-        log_file = open(filename, "a")
-        print(f"Logging to {filename}")
-
-        # Subscribe to notifications
+        # Start receiving notifications
         await client.start_notify(char_uuid, read_callback)
+        print("Notifications started.")
 
-        # Run user input in parallel with notifications
+        # Handle user input while receiving data
         await user_input_writer(client, char_uuid)
 
-        # Stop notifications and close file
+        # Stop receiving notifications
         await client.stop_notify(char_uuid)
-        log_file.close()
-        log_file = None
         print("Disconnected.")
 
 if __name__ == "__main__":
